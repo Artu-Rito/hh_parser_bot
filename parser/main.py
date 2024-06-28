@@ -125,7 +125,7 @@ def get_vacancy(link):
     except:
         salary = "not specified"
     try:
-        skills = [tag.text for tag in soup.find(attrs={"class": "vacancy-skill-list--COfJZoDl6Y8AwbMFAh5Z"}).find_all(attrs={"class":"magritte-tag__label___YHV-o_2-0-12"})]
+        skills = [tag.text for tag in soup.find(attrs={"class": "vacancy-skill-list--COfJZoDl6Y8AwbMFAh5Z"}).find_all(attrs={"class":"magritte-tag__label___YHV-o_3-0-0"})]
     except:
         skills = ["not specified"]
     vacancy = {
@@ -137,6 +137,6 @@ def get_vacancy(link):
     return vacancy
 
 if __name__ == "__main__":
-    for a in get_vacanсy_links("python"):
-        print(get_vacancy(a))
+    for a in get_resume_links("python"):
+        print(get_resume(a))
         time.sleep(1)
