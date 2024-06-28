@@ -69,7 +69,8 @@ def get_resume(link):
         "name": name,
         "salary": salary,
         "work_exp": work_exp,
-        "tags": tags
+        "tags": tags,
+        "link": link
     }
     return resume
 
@@ -132,7 +133,8 @@ def get_vacancy(link):
         "job_name": job_name,
         "company_name": company_name,
         "salary": salary,
-        "skills": skills
+        "skills": skills,
+        "link": link
     }
     return vacancy
 
