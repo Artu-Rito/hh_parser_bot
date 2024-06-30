@@ -1,20 +1,29 @@
-import json
-import requests
 import aiosqlite
 from fake_useragent import UserAgent
 from aiogram import Bot, Dispatcher, executor, types
 from aiogram.contrib.middlewares.logging import LoggingMiddleware
 from aiogram.types import ReplyKeyboardMarkup, KeyboardButton
+from aiogram.dispatcher import FSMContext
+from aiogram.dispatcher.filters.state import State, StatesGroup
+from aiogram.contrib.fsm_storage.memory import MemoryStorage
+import aiohttp
 
 # Пути к базам данных
 DB_PATH_VACANCIES = 'vacancies.db'
 DB_PATH_USERS = 'users.db'
 
+storage = MemoryStorage()
+
 # Токен API для бота
 API_TOKEN = '7418121276:AAGhBCSglrlN5kz53vZqbk_G9Km_Q3GHVSc'
 bot = Bot(token=API_TOKEN)
-dp = Dispatcher(bot)
+dp = Dispatcher(bot, storage=storage)
 dp.middleware.setup(LoggingMiddleware())
+
+# Определение состояний
+class Form(StatesGroup):
+    keyword = State()  # Ключевое слово для поиска
+    page = State()     # Номер страницы для поиска
 
 # Инициализация базы данных пользователей
 async def init_user_db():
@@ -38,7 +47,8 @@ async def init_db():
                 url TEXT,
                 requirement TEXT,
                 responsibility TEXT,
-                company_name TEXT
+                company_name TEXT,
+                salary TEXT
             )
         ''')
         await db.commit()
@@ -50,7 +60,7 @@ async def clear_vacancies():
         await db.commit()
 
 # Асинхронная функция для получения вакансий и сохранения их в базу данных
-async def get_vacancies(text):
+async def get_vacancies(text, message: types.Message, page):
     await clear_vacancies()  # Очищаем таблицу перед добавлением новых данных
     await init_db()  # Инициализируем базу данных и таблицу
     url = "https://api.hh.ru/vacancies"
@@ -59,42 +69,50 @@ async def get_vacancies(text):
     params = {
         "text": text,
         "area": 1,
-        "page": 0,
-        "per_page": 100
+        "page": page,
+        "per_page": 100,
+        "only_with_salary": 1
     }
     headers = {
         "User-Agent": user_agent
     }
 
-    response = requests.get(url, params=params, headers=headers)
+    async with aiohttp.ClientSession() as session:
+        async with session.get(url, params=params, headers=headers) as response:
+            if response.status == 200:
+                json_data = await response.json()
+                vacancies = json_data['items']
+                found_count = json_data['found']
+                await message.reply(f"Найдено вакансий: {found_count}")
 
-    if response.status_code == 200:
-        data = response.content.decode()
-        json_data = json.loads(data)
-        vacancies = json_data['items']
-        print(f"Найдено вакансий: {json_data['found']}")
+                async with aiosqlite.connect(DB_PATH_VACANCIES) as db:
+                    for vacancy in vacancies:
+                        id = vacancy.get("id")
+                        title = vacancy.get("name")
+                        url = vacancy.get("alternate_url")
+                        requirement = vacancy.get("snippet", {}).get("requirement", "Не указано")
+                        responsibility = vacancy.get("snippet", {}).get("responsibility", "Не указано")
+                        company_name = vacancy.get("employer", {}).get("name", "Не указано")
+                        salary_info = vacancy.get("salary")
+                        salary = 'Не указано'
+                        if salary_info:
+                            salary = f"{salary_info.get('from', '—')} — {salary_info.get('to', '—')} {salary_info.get('currency', '—')}"
 
-        async with aiosqlite.connect(DB_PATH_VACANCIES) as db:
-            for vacancy in vacancies:
-                id = vacancy.get("id")
-                title = vacancy.get("name")
-                url = vacancy.get("alternate_url")
-                requirement = vacancy.get("snippet", {}).get("requirement", "Не указано")
-                responsibility = vacancy.get("snippet", {}).get("responsibility", "Не указано")
-                company_name = vacancy.get("employer", {}).get("name", "Не указано")
+                        if not all([id, title, url, requirement, responsibility, company_name]):
+                            print(f"Пропускаем вакансию {id} из-за отсутствия данных")
+                            continue
 
-                if not all([id, title, url, requirement, responsibility, company_name]):
-                    print(f"Пропускаем вакансию {id} из-за отсутствия данных")
-                    continue
-
-                await db.execute('''
-                    INSERT INTO vacancies (id, title, url, requirement, responsibility, company_name)
-                    VALUES (?, ?, ?, ?, ?, ?)
-                ''', (id, title, url, requirement, responsibility, company_name))
-            await db.commit()
-
-    else:
-        print("Ошибка запроса к API: HTTP статус", response.status_code)
+                        try:
+                            await db.execute('''
+                                INSERT INTO vacancies (id, title, url, requirement, responsibility, company_name, salary)
+                                VALUES (?, ?, ?, ?, ?, ?, ?)
+                            ''', (id, title, url, requirement, responsibility, company_name, salary))
+                            print(f"Вакансия {id} добавлена в базу данных")
+                        except Exception as e:
+                            print(f"Ошибка при добавлении вакансии {id}: {e}")
+                    await db.commit()
+            else:
+                await message.reply(f"Ошибка запроса к API: HTTP статус {response.status}")
 
 # Клавиатура для бота
 keyboard = ReplyKeyboardMarkup(resize_keyboard=True)
@@ -113,31 +131,53 @@ async def send_welcome(message: types.Message):
     # Приветственное сообщение пользователю
     await message.reply("Привет! Я могу помочь тебе найти вакансии. Нажми на кнопку ниже или введи ключевое слово.", reply_markup=keyboard)
 
-# Обработчик для поиска вакансий
-@dp.message_handler(lambda message: message.text and 'Найти вакансии' in message.text)
-async def ask_for_keyword(message: types.Message):
+# Обработчик для начала диалога поиска вакансий
+@dp.message_handler(lambda message: message.text and 'Найти вакансии' in message.text, state='*')
+async def ask_for_keyword(message: types.Message, state: FSMContext):
+    await Form.keyword.set()
     await message.reply("Введите ключевое слово для поиска вакансий.")
 
-# Обработчик команды для очистки базы данных вакансий
-@dp.message_handler(commands=['clear'])
-async def clear_database(message: types.Message):
-    await clear_vacancies()  # Вызов функции для очистки таблицы вакансий
-    await message.reply("База данных вакансий очищена.")
+# Обработчик для сохранения ключевого слова и запроса номера страницы
+@dp.message_handler(state=Form.keyword)
+async def set_keyword(message: types.Message, state: FSMContext):
+    async with state.proxy() as data:
+        data['keyword'] = message.text
+    # Вызов функции для получения общего количества вакансий
+    await get_total_vacancies_count(data['keyword'], message)
 
-# Обработчик текстовых сообщений для сохранения ключевого слова и поиска вакансий
-@dp.message_handler()
-async def search_vacancies(message: types.Message):
-    # Проверяем, что сообщение не является командой /clear
-    if message.text.startswith('/'):
-        return
-    # Сохранение ключевого слова в базу данных пользователей
-    user_id = message.from_user.id
-    keyword = message.text
-    async with aiosqlite.connect(DB_PATH_USERS) as db:
-        await db.execute('UPDATE users SET search_keyword = ? WHERE user_id = ?', (keyword, user_id))
-        await db.commit()
+# Новая асинхронная функция для получения общего количества вакансий
+async def get_total_vacancies_count(text, message: types.Message):
+    url = "https://api.hh.ru/vacancies"
+    user_agent = UserAgent().random
+    params = {
+        "text": text,
+        "area": 1,
+        "per_page": 1,  # Запрашиваем только одну вакансию для получения общего количества
+        "only_with_salary": 1
+    }
+    headers = {
+        "User-Agent": user_agent
+    }
+
+    async with aiohttp.ClientSession() as session:
+        async with session.get(url, params=params, headers=headers) as response:
+            if response.status == 200:
+                json_data = await response.json()
+                found_count = json_data['found']
+                max_pages = (found_count - 1) // 100 + 1  # Рассчитываем количество страниц
+                await message.reply(f"Найдено вакансий: {found_count}. Можете выбрать страницу от 1 до {max_pages}.")
+                await Form.page.set()  # Переходим к следующему состоянию для запроса номера страницы
+            else:
+                await message.reply(f"Ошибка запроса к API: HTTP статус {response.status}")
+
+# Обработчик для сохранения номера страницы и запуска поиска вакансий
+@dp.message_handler(state=Form.page)
+async def set_page(message: types.Message, state: FSMContext):
+    async with state.proxy() as data:
+        data['page'] = message.text
+    await state.finish()
     # Вызов функции для получения вакансий
-    await get_vacancies(text=keyword)
+    await get_vacancies(data['keyword'], message, int(data['page']))
 
 # Запуск бота
 if __name__ == '__main__':
