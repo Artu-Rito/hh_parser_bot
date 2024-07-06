@@ -36,6 +36,7 @@ class FilterForm(StatesGroup): #Отдльный класс состояний �
 
 # Списки для фильтров
 employment_values = [
+    "Пропустить",
     "Полная занятость",
     "Частичная занятость",
     "Проектная работа",
@@ -44,6 +45,7 @@ employment_values = [
 ]
 
 experience_values = [
+    "Пропустить",
     "Нет опыта",
     "От 1 года до 3 лет",
     "От 3 до 6 лет",
@@ -51,6 +53,7 @@ experience_values = [
 ]
 
 schedule_values = [
+    "Пропустить",
     "Полный день",
     "Сменный график",
     "Гибкий график",
@@ -245,11 +248,11 @@ async def get_filtered_vacancies(table_name, employment, experience, schedule, l
     async with aiosqlite.connect(DB_PATH_VACANCIES) as db:
         # Формируем условия фильтрации для SQL запроса
         conditions = []
-        if employment in employment_values:
+        if employment in employment_values and employment != "Пропустить":
             conditions.append(f"employment = '{employment}'")
-        if experience in experience_values:
+        if experience in experience_values and experience != "Пропустить":
             conditions.append(f"experience = '{experience}'")
-        if schedule in schedule_values:
+        if schedule in schedule_values and schedule != "Пропустить":
             conditions.append(f"schedule = '{schedule}'")
 
         # Собираем условия в один SQL запрос
