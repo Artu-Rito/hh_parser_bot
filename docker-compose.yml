@@ -1,0 +1,9 @@
+version: '3.1'
+
+services:
+  bot:
+    build: .
+    volumes:
+      - ./users.db:/usr/src/app/users.db
+      - ./vacancies.db:/usr/src/app/vacancies.db
+    restart: always

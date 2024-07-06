@@ -20,6 +20,7 @@ API_TOKEN = '7418121276:AAGhBCSglrlN5kz53vZqbk_G9Km_Q3GHVSc'
 bot = Bot(token=API_TOKEN)
 dp = Dispatcher(bot, storage=storage)
 dp.middleware.setup(LoggingMiddleware())
+ADMIN_USER_ID = 1473547063
 
 # Классы для определения состояний
 class Form(StatesGroup):
@@ -281,6 +282,19 @@ async def get_filtered_vacancies(table_name, employment, experience, schedule, l
 
 ###Обработчики
 
+@dp.message_handler(commands=['clear_all_tables'], state='*')
+async def clear_all_tables(message: types.Message, state: FSMContext):
+    user_id = message.from_user.id
+    if user_id == ADMIN_USER_ID:
+        # Получаем список всех таблиц с вакансиями
+        table_names = await get_user_table_names(user_id)
+        async with aiosqlite.connect(DB_PATH_VACANCIES) as db:
+            for table_name in table_names:
+                await db.execute(f'DROP TABLE IF EXISTS "{table_name}"')
+            await db.commit()
+        await message.reply("Все таблицы с вакансиями были успешно удалены.")
+    else:
+        await message.reply("У вас нет прав для выполнения этой команды.")
 
 # Обработчик команды старта
 @dp.message_handler(commands=['start'])
