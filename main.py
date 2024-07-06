@@ -433,7 +433,7 @@ async def exit_command(message: types.Message, state: FSMContext):
     await message.reply("Бот сброшен в начальное состояние. Используйте команду /start, чтобы начать заново.")
 
 # Обработчик команды /search_with_filters
-@dp.message_handler(commands=['search_with_filters'])
+@dp.message_handler(commands=['show_with_filters'])
 async def search_with_filters_command(message: types.Message, state: FSMContext):
     user_id = message.from_user.id
     # Получаем список таблиц для пользователя
